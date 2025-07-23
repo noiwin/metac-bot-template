@@ -1,0 +1,28 @@
+name: Custom Forecast – Shad Question (Conda)
+
+on:
+  workflow_dispatch:  # ou on: [push] si tu veux le déclencher automatiquement
+
+jobs:
+  forecast-shad:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python 3.10
+      uses: actions/setup-python@v3
+      with:
+        python-version: '3.10'
+
+    - name: Add conda to system path
+      run: |
+        echo $CONDA/bin >> $GITHUB_PATH
+
+    - name: Install dependencies
+      run: |
+        conda env update --file environment.yml --name base
+
+    - name: Run custom forecast
+      run: |
+        python main.py --mode custom_injection
