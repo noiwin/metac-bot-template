@@ -18,8 +18,10 @@ from forecasting_tools import (
     run_benchmark_streamlit_page,
 )
 
+from decompose_main import Decomp_forecaster
+from decompose_mainopy import Decomp_forecaster2 as SVADCbot
+from PureSVA import Decomp_forecaster3 as SVAbot
 from main import TemplateForecaster
-
 logger = logging.getLogger(__name__)
 
 
@@ -29,7 +31,7 @@ async def benchmark_forecast_bot(mode: str) -> None:
     Run a benchmark that compares your forecasts against the community prediction
     """
 
-    number_of_questions = 100 # Recommend 100+ for meaningful error bars, but 30 is faster/cheaper
+    number_of_questions = 15# Recommend 100+ for meaningful error bars, but 30 is faster/cheaper
     if mode == "display":
         run_benchmark_streamlit_page()
         return
@@ -58,6 +60,7 @@ async def benchmark_forecast_bot(mode: str) -> None:
 
     with MonetaryCostManager() as cost_manager:
         bots = [
+            
             TemplateForecaster(
                 predictions_per_research_report=5,
                 llms={
@@ -67,16 +70,15 @@ async def benchmark_forecast_bot(mode: str) -> None:
                     ),
                 },
             ),
-            TemplateForecaster(
-                predictions_per_research_report=1,
+            SVAbot(
+                predictions_per_research_report=5,
                 llms={
                     "default": GeneralLlm(
                         model="openrouter/openai/gpt-4o-mini",
                         temperature=0.3,
                     ),
                 },
-            ),
-            # Add other ForecastBots here (or same bot with different parameters)
+            ),# Add other ForecastBots here (or same bot with different parameters)
         ]
         bots = typeguard.check_type(bots, list[ForecastBot])
         benchmarks = await Benchmarker(

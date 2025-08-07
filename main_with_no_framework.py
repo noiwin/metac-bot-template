@@ -16,9 +16,9 @@ from asknews_sdk import AskNewsSDK
 ######################### CONSTANTS #########################
 # Constants
 SUBMIT_PREDICTION = True  # set to True to publish your predictions to Metaculus
-USE_EXAMPLE_QUESTIONS = False  # set to True to forecast example questions rather than the tournament questions
+USE_EXAMPLE_QUESTIONS = True # set to True to forecast example questions rather than the tournament questions
 NUM_RUNS_PER_QUESTION = 5  # The median forecast is taken between NUM_RUNS_PER_QUESTION runs
-SKIP_PREVIOUSLY_FORECASTED_QUESTIONS = True
+SKIP_PREVIOUSLY_FORECASTED_QUESTIONS = False
 
 # Environment variables
 # You only need *either* Exa or Perplexity or AskNews keys for online research
@@ -200,7 +200,7 @@ CONCURRENT_REQUESTS_LIMIT = 5
 llm_rate_limiter = asyncio.Semaphore(CONCURRENT_REQUESTS_LIMIT)
 
 
-async def call_llm(prompt: str, model: str = "gpt-4o", temperature: float = 0.3) -> str:
+async def call_llm(prompt: str, model: str = "openrouter/openai/gpt-4o-mini", temperature: float = 0.3) -> str:
     """
     Makes a streaming completion request to OpenAI's API with concurrent request limiting.
     """
@@ -209,12 +209,14 @@ async def call_llm(prompt: str, model: str = "gpt-4o", temperature: float = 0.3)
     # Also checkout the package 'litellm' for one function that can call any model from any provider
     # Email ben@metaculus.com if you need credit for the Metaculus OpenAI/Anthropic proxy
     client = AsyncOpenAI(
-        base_url="https://llm-proxy.metaculus.com/proxy/openai/v1",
+        base_url="https://openrouter.ai/api/v1",
+        api_key=os.getenv("OPENROUTER_API_KEY")
+        ,
         default_headers={
             "Content-Type": "application/json",
             "Authorization": f"Token {METACULUS_TOKEN}",
         },
-        api_key="Fake API Key since openai requires this not to be NONE. This isn't used",
+        #api_key="Fake API Key since openai requires this not to be NONE. This isn't used",
         max_retries=2,
     )
 
@@ -233,18 +235,20 @@ async def call_llm(prompt: str, model: str = "gpt-4o", temperature: float = 0.3)
 
 def run_research(question: str) -> str:
     research = ""
-    if ASKNEWS_CLIENT_ID and ASKNEWS_SECRET:
-        research = call_asknews(question)
-    elif EXA_API_KEY:
-        research = call_exa_smart_searcher(question)
-    elif PERPLEXITY_API_KEY:
-        research = call_perplexity(question)
-    else:
-        research = "No research done"
+    
+    #if ASKNEWS_CLIENT_ID and ASKNEWS_SECRET:
+        #research = call_asknews(question)
+    #elif EXA_API_KEY:
+        #research = call_exa_smart_searcher(question)
+    #elif PERPLEXITY_API_KEY:
+        #research = call_perplexity(question)
+    #else:
+        #research = "No research done"
 
     print(f"########################\nResearch Found:\n{research}\n########################")
-
     return research
+
+
 
 def call_perplexity(question: str) -> str:
     url = "https://api.perplexity.ai/chat/completions"
@@ -423,6 +427,9 @@ async def get_binary_gpt_prediction(
     question_type = question_details["type"]
 
     summary_report = run_research(title)
+    if summary_report == "No research done":
+        raise RunTimeError("Model is running in a no research mode!!!")
+
 
     content = BINARY_PROMPT_TEMPLATE.format(
         title=title,
@@ -1057,19 +1064,31 @@ async def forecast_questions(
 
 
 
+def test_research():
+    result = run_research("Will humans achieve Immortality by 2100")
+    if result == "No research done":
+        print("No research done, it's fucked up!")
+    else:
+        print("That's great actually")
 
 ######################## FINAL RUN #########################
 if __name__ == "__main__":
-    if USE_EXAMPLE_QUESTIONS:
-        open_question_id_post_id = EXAMPLE_QUESTIONS
-    else:
-        open_question_id_post_id = get_open_question_ids_from_tournament()
+    import sys
 
-    asyncio.run(
-        forecast_questions(
-            open_question_id_post_id,
-            SUBMIT_PREDICTION,
-            NUM_RUNS_PER_QUESTION,
-            SKIP_PREVIOUSLY_FORECASTED_QUESTIONS,
+    if len(sys.argv) > 1 and sys.argv[1] == "test_research":
+        test_research()
+    else:
+        if USE_EXAMPLE_QUESTIONS:
+            open_question_id_post_id = EXAMPLE_QUESTIONS
+        else:
+            open_question_id_post_id = get_open_question_ids_from_tournament()
+
+        asyncio.run(
+            forecast_questions(
+                open_question_id_post_id,
+                SUBMIT_PREDICTION,
+                NUM_RUNS_PER_QUESTION,
+                SKIP_PREVIOUSLY_FORECASTED_QUESTIONS,
+            )
         )
-    )
+

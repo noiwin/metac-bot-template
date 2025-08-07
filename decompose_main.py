@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 
 dotenv.load_dotenv()
 
-class TemplateForecaster(ForecastBot):
+class Decomp_forecaster(ForecastBot):
     """
  This is a copy of the template bot for Q2 2025 Metaculus AI Tournament.
     The official bots on the leaderboard use AskNews in Q2.
@@ -63,25 +63,71 @@ class TemplateForecaster(ForecastBot):
     _max_concurrent_questions = 2  # Set this to whatever works for your search-provider/ai-model rate limits
     _concurrency_limiter = asyncio.Semaphore(_max_concurrent_questions)
 
+    async def decompose_question(self, question:MetaculusQuestion) -> str:
+         prompt = clean_indents(
+            f"""
+            You are an assistant to a superforecaster.
+            You need to decompose the following question in 3 different and independant ones to help the forecaster.
+        
 
+            Question:
+            {question}
+            """
+        )
+         reasoning1 = await self.get_llm("default", "llm").invoke(prompt)
+         return reasoning1 
+         
+        
+
+        
     async def run_research(self, question: MetaculusQuestion) -> str:
-        async with self._concurrency_limiter:
-            research = ""
+     async with self._concurrency_limiter:
+        research_parts = []
+
+        # Step 1: Decompose Question into sub-questions
+        decomposition_text = await self.decompose_question(question)
+        sub_questions = self._parse_sub_questions(decomposition_text)
+
+
+        logger.info(f"Decomposed question '{question.page_url}' into sub-questions:")
+        for idx, sub_q in enumerate(sub_questions, start=1):
+            logger.info(f"  {idx}. {sub_q}")
+
+        # Step 2: Research on each sub-question
+        for sub_question in sub_questions:
             if os.getenv("OPENROUTER_API_KEY"):
-                research = await self._call_perplexity(
-                    question.question_text, use_open_router=True
-                )
+                research = await self._call_perplexity(sub_question, use_open_router=True)
             else:
                 logger.warning(
-                    f"No research provider found when processing question URL {question.page_url}. Will pass back empty string."
+                    f"No research provider found when processing sub-question: {sub_question}. Passing back empty string."
                 )
                 research = ""
-            logger.info(
-                f"Found Research for URL {question.page_url}:\n{research}"
-            )
-            return research
+            research_parts.append(f"Research for sub-question '{sub_question}':\n{research}\n")
 
+        # Combine all research parts
+        final_research = "\n\n".join(research_parts)
 
+        logger.info(
+            f"Found Research for URL {question.page_url}:\n{final_research}"
+        )
+        return final_research
+    
+    def _parse_sub_questions(self, decomposition_text: str) -> list[str]:
+    
+     lines = decomposition_text.strip().split("\n")
+     sub_questions = []
+
+     for line in lines:
+        line = line.strip()
+        if any(line.startswith(f"{i}.") for i in range(1, 10)):
+            # Extract text after the number and dot
+            sub_questions.append(line.split(".", 1)[1].strip())
+
+     if not sub_questions:
+        # Fallback if numbering not found, take non-empty lines
+        sub_questions = [line for line in lines if line]
+
+     return sub_questions[:4]  # Limit to maximum 4 sub-questions
 
 
     async def _call_perplexity(
@@ -92,7 +138,7 @@ class TemplateForecaster(ForecastBot):
             You are an assistant to a superforecaster.
             The superforecaster will give you a question they intend to forecast on.
             To be a great assistant, you generate a concise but detailed rundown of the most relevant news, including if the question would resolve Yes or No based on current information.
-            You do not produce forecasts yourself. 
+            You do not produce forecasts yourself. Moreover, in the beginning of your response, you rewrite the question you are asked to research in the form "Research on sub-question : (the question)"
 
             Question:
             {question}
@@ -112,7 +158,7 @@ class TemplateForecaster(ForecastBot):
   
 
     async def _run_forecast_on_binary(
-        self, question: BinaryQuestion, research: str
+        self, question: BinaryQuestion, final_research: str
     ) -> ReasonedPrediction[float]:
         prompt = clean_indents(
             f"""
@@ -132,7 +178,7 @@ class TemplateForecaster(ForecastBot):
 
 
             Your research assistant says:
-            {research}
+            {final_research}
 
             Today is {datetime.now().strftime("%Y-%m-%d")}.
 
@@ -329,7 +375,7 @@ if __name__ == "__main__":
         "test_questions",
     ], "Invalid run mode"
 
-    template_bot = TemplateForecaster(
+    template_bot = Decomp_forecaster(
         research_reports_per_question=1,
         predictions_per_research_report=5,
         use_research_summary_to_forecast=False,
@@ -382,4 +428,4 @@ if __name__ == "__main__":
         forecast_reports = asyncio.run(
             template_bot.forecast_questions(questions, return_exceptions=True)
         )
-    TemplateForecaster.log_report_summary(forecast_reports)  # type: ignore
+    Decomp_forecaster.log_report_summary(forecast_reports)  # type: ignore
