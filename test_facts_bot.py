@@ -27,62 +27,127 @@ logger = logging.getLogger(__name__)
 
 dotenv.load_dotenv()
 
-class TemplateForecaster(ForecastBot):
-    """
- This is a copy of the template bot for Q2 2025 Metaculus AI Tournament.
-    The official bots on the leaderboard use AskNews in Q2.
-    Main template bot changes since Q1
-    - Support for new units parameter was added
-    - You now set your llms when you initialize the bot (making it easier to switch between and benchmark different models)
-
-    The main entry point of this bot is `forecast_on_tournament` in the parent class.
-    See the script at the bottom of the file for more details on how to run the bot.
-    Ignoring the finer details, the general flow is:
-    - Load questions from Metaculus
-    - For each question
-        - Execute run_research a number of times equal to research_reports_per_question
-        - Execute respective run_forecast function `predictions_per_research_report * research_reports_per_question` times
-        - Aggregate the predictions
-        - Submit prediction (if publish_reports_to_metaculus is True)
-    - Return a list of ForecastReport objects
-
-    Only the research and forecast functions need to be implemented in ForecastBot subclasses.
-
-    If you end up having trouble with rate limits and want to try a more sophisticated rate limiter try:
-    ```
-    from forecasting_tools.ai_models.resource_managers.refreshing_bucket_rate_limiter import RefreshingBucketRateLimiter
-    rate_limiter = RefreshingBucketRateLimiter(
-        capacity=2,
-        refresh_rate=1,
-    ) # Allows 1 request per second on average with a burst of 2 requests initially. Set this as a class variable
-    await self.rate_limiter.wait_till_able_to_acquire_resources(1) # 1 because it's consuming 1 request (use more if you are adding a token limit)
-    ```
-    Additionally OpenRouter has large rate limits immediately on account creation
-    """
+class Decomp_forecaster3(ForecastBot):
+    
 
     _max_concurrent_questions = 2  # Set this to whatever works for your search-provider/ai-model rate limits
     _concurrency_limiter = asyncio.Semaphore(_max_concurrent_questions)
 
+    async def absurdestroyer(self, question: MetaculusQuestion) -> str:
+        prompt = f"""
+        You are a logical assistant whose job is to provide a forecaster with a short list of basic, reliable facts to ground their reasoning.
 
+        Your role is not to forecast, analyze, or speculate.
+
+        You must output only true or almost certainly true facts that:
+        - Are directly relevant to the question
+        - Are short, checkable, and unambiguous
+        - Provide useful legal, chronological, historical or physical context
+
+        You must list only 4 to 6 facts maximum. Never list more.
+        You do NOT write explanations, just bullet-point facts.
+        You do NOT include opinions, uncertain claims, or speculative scenarios.
+
+        Title your output "FACTS", then list the facts (no markdown, no numbering, no extra formatting).
+
+        ---
+
+        Question:
+        {question.question_text}
+
+        Today is: {datetime.now().strftime("%Y-%m-%d")}
+        """
+
+        response = await self._call_perplexity(prompt, use_open_router=True)
+        return response.strip()
+
+   
+
+
+
+    async def volatility_scorer(self, question:MetaculusQuestion) -> dict:
+        prompt = f"""
+        You are a top-tier risk analyst specialized in forecasting question volatility.
+
+        You are given a forecasting question
+        Your job is to evaluate how likely it is that the situation changes significantly before resolution.
+
+        The key points you will analyze are:
+        (a) Current consensus stability: Is the current situation stable and robust, or fragile?
+        (b) Emerging disruptive scenarios: Are there credible but underappreciated scenarios that could cause a reversal?
+        (c) Time sensitivity: How much time is left for dynamics to unfold, increasing uncertainty?
+        (d) Fragility signals: Are there weak signals suggesting the current trend could break down?
+
+        You summarize in a few sentences.
+
+        Then you give a final "Volatility Score" (from 0 to 1) where:
+        - 0 means an extremely stable and predictable situation.
+        - 1 means a highly volatile, uncertain and fragile situation.
+
+        You give out the volatility score in the form "Volatility Score: X.X"
+
+        Question:
+        {question}
+
+        """
+        response = await self._call_perplexity(prompt, use_open_router=True)
+
+        logger.info(f"Volatility response \n{response}")
+
+        # Extract volatility score (last float between 0 and 1)
+        import re
+        match = re.search(r"Volatility Score\s*[:=]\s*([01](?:\.\d+)?)", response)
+
+        if match:
+            volatility_score = float(match.group(1))
+        else:
+            volatility_score = 0.5
+        logger.info(f"This is THE VOLATILITY BROOOOOOOOOOOOOOO \n{volatility_score}") # Fallback if parsing fails
+
+        return {
+            "analysis": response.strip(),
+            "volatility_score": volatility_score
+        }
+
+
+
+        
     async def run_research(self, question: MetaculusQuestion) -> str:
-        async with self._concurrency_limiter:
-            research = ""
-            if os.getenv("OPENROUTER_API_KEY"):
-                research = await self._call_perplexity(
-                    question.question_text, use_open_router=True
-                )
-            else:
-                logger.warning(
-                    f"No research provider found when processing question URL {question.page_url}. Will pass back empty string."
-                )
-                research = ""
-            logger.info(
-                f"Found Research for URL {question.page_url}:\n{research}"
-            )
-            return research
+     async with self._concurrency_limiter:
+        research_parts = []
+        
+        if os.getenv("OPENROUTER_API_KEY"):
+            research = await self._call_perplexity(question, use_open_router=True)
+        else:
+            None
+        research_parts.append(research)
+
+        # Step 3: Volatility Scorer
+        volatility_output = await self.volatility_scorer(question)
+        volatility_score = volatility_output["volatility_score"]
+        volatility_analysis = volatility_output["analysis"]
+
+        logger.info(f"ON A LA VOLATILITY : {volatility_score}")
 
 
+        # Step 4: Destroying absurdities with FACTS
 
+        facts = await self.absurdestroyer(question)
+
+        logger.info(f"{facts}")
+
+
+        # Combine all research parts
+        final_research = "\n\n".join(research_parts)
+        final_research += f"\n\nVolatility Score: {volatility_score}\nVolatility Analysis: {volatility_analysis}"
+        final_research += f"\n\n\n Your facts :\n{facts}"
+
+        logger.info(
+            f"Found Research for URL {question.page_url}:\n{final_research}"
+        )
+        return final_research
+    
+    
 
     async def _call_perplexity(
         self, question: str, use_open_router: bool = False
@@ -92,7 +157,7 @@ class TemplateForecaster(ForecastBot):
             You are an assistant to a superforecaster.
             The superforecaster will give you a question they intend to forecast on.
             To be a great assistant, you generate a concise but detailed rundown of the most relevant news, including if the question would resolve Yes or No based on current information.
-            You do not produce forecasts yourself. 
+            You do not produce forecasts yourself.
 
             Question:
             {question}
@@ -112,7 +177,7 @@ class TemplateForecaster(ForecastBot):
   
 
     async def _run_forecast_on_binary(
-        self, question: BinaryQuestion, research: str
+        self, question: BinaryQuestion, final_research: str
     ) -> ReasonedPrediction[float]:
         prompt = clean_indents(
             f"""
@@ -132,7 +197,7 @@ class TemplateForecaster(ForecastBot):
 
 
             Your research assistant says:
-            {research}
+            {final_research}
 
             Today is {datetime.now().strftime("%Y-%m-%d")}.
 
@@ -142,9 +207,17 @@ class TemplateForecaster(ForecastBot):
             (c) A brief description of a scenario that results in a No outcome.
             (d) A brief description of a scenario that results in a Yes outcome.
 
-            You write your rationale remembering that good forecasters put extra weight on the status quo outcome since the world changes slowly most of the time.
-
+            You'll notice that in your research provided, there is a volatility score :  
+            0.0–0.3 : The situation is stable. Lean towards the status quo unless strong disruptive signals emerge.
+            0.3–0.6 : The situation has moderate volatility. Consider both status quo and plausible disruptive scenarios.
+            0.6–1.0 : The situation is highly volatile. You should overweight unexpected disruptive scenarios and avoid overconfidence in the status quo.
             The last thing you write is your final answer as: "Probability: ZZ%", 0-100
+
+            You are also given key facts, which you must treat as hard constraints. Do not contradict them.
+            If any scenario contradicts these facts (e.g., violates constitutional limits, established laws, or known history), you must tread very carefully.
+
+...
+
             """
         )
         reasoning = await self.get_llm("default", "llm").invoke(prompt)
@@ -190,6 +263,11 @@ class TemplateForecaster(ForecastBot):
             (c) A description of an scenario that results in an unexpected outcome.
 
             You write your rationale remembering that (1) good forecasters put extra weight on the status quo outcome since the world changes slowly most of the time, and (2) good forecasters leave some moderate probability on most options to account for unexpected outcomes.
+
+            You'll notice that in your research provided, there is a volatility score :  
+            0.0–0.3 : The situation is stable. Lean towards the status quo unless strong disruptive signals emerge.
+            0.3–0.6 : The situation has moderate volatility. Consider both status quo and plausible disruptive scenarios.
+            0.6–1.0 : The situation is highly volatile. You should overweight unexpected disruptive scenarios and avoid overconfidence in the status quo.
 
             The last thing you write is your final probabilities for the N options in this order {question.options} as:
             Option_A: Probability_A
@@ -255,6 +333,11 @@ class TemplateForecaster(ForecastBot):
             (f) A brief description of an unexpected scenario that results in a high outcome.
 
             You remind yourself that good forecasters are humble and set wide 90/10 confidence intervals to account for unknown unknowns.
+
+            You'll notice that in your research provided, there is a volatility score :  
+            0.0–0.3 : The situation is stable. Lean towards the status quo unless strong disruptive signals emerge.
+            0.3–0.6 : The situation has moderate volatility. Consider both status quo and plausible disruptive scenarios.
+            0.6–1.0 : The situation is highly volatile. You should overweight unexpected disruptive scenarios and avoid overconfidence in the status quo.
 
             The last thing you write is your final answer as:
             "
@@ -329,7 +412,7 @@ if __name__ == "__main__":
         "test_questions",
     ], "Invalid run mode"
 
-    template_bot = TemplateForecaster(
+    template_bot = Decomp_forecaster3(
         research_reports_per_question=1,
         predictions_per_research_report=5,
         use_research_summary_to_forecast=False,
@@ -382,4 +465,4 @@ if __name__ == "__main__":
         forecast_reports = asyncio.run(
             template_bot.forecast_questions(questions, return_exceptions=True)
         )
-    TemplateForecaster.log_report_summary(forecast_reports)  # type: ignore
+    Decomp_forecaster3.log_report_summary(forecast_reports)  # type: ignore

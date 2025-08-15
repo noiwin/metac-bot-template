@@ -19,9 +19,9 @@ from forecasting_tools import (
 )
 
 from decompose_main import Decomp_forecaster
-from decompose_mainopy import Decomp_forecaster2 as SVADCbot
 from PureSVA import Decomp_forecaster3 as SVAbot
 from main import TemplateForecaster
+from PolySVAbot import Decomp_forecaster3 as SVABbot
 logger = logging.getLogger(__name__)
 
 
@@ -65,7 +65,7 @@ async def benchmark_forecast_bot(mode: str) -> None:
                 predictions_per_research_report=5,
                 llms={
                     "default": GeneralLlm(
-                        model="openrouter/openai/gpt-4o-mini",
+                        model="openrouter/openai/gpt-5",
                         temperature=0.3,
                     ),
                 },
@@ -74,7 +74,7 @@ async def benchmark_forecast_bot(mode: str) -> None:
                 predictions_per_research_report=5,
                 llms={
                     "default": GeneralLlm(
-                        model="openrouter/openai/gpt-4o-mini",
+                        model="openrouter/openai/gpt-5",
                         temperature=0.3,
                     ),
                 },
@@ -130,5 +130,3 @@ if __name__ == "__main__":
         args.mode
     )
     asyncio.run(benchmark_forecast_bot(mode))
-
-
