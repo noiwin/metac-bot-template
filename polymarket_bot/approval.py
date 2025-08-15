@@ -6,7 +6,7 @@ from web3.middleware import ExtraDataToPOAMiddleware
 
 rpc_url = "https://polygon-rpc.com"  # Public Polygon RPC
 private_key = os.getenv("PRIVATE_KEY")   # Mets ta private key ici (attention!)
-public_address = "0x49AcE7a854ddcddBeB5BBEF11146a3A5E67a66a8"  # Ton adresse publique (Metamask)
+public_address = "0x49AcE7a854ddcddBeB5BBEF11146a3A5E67a66a8"  # Ton adresse publique (Metamask)git a
 
 
 chain_id = 137
